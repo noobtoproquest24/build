@@ -1,0 +1,81 @@
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: 17}
+      - uses: gradle/actions/setup-gradle@v3
+        with: {gradle-version: 8.2}
+      - name: Generate Android project
+        run: |
+          test -f index.html || { echo "index.html is missing"; exit 1; }
+          mkdir -p app/src/main/assets app/src/main/java/com/aero/webview
+          cp index.html app/src/main/assets/index.html
+          echo "pluginManagement{repositories{google();mavenCentral();gradlePluginPortal()}}" > settings.gradle
+          echo "dependencyResolutionManagement{repositories{google();mavenCentral()}}" >> settings.gradle
+          echo "include ':app'" >> settings.gradle
+          echo "plugins{id 'com.android.application' version '8.2.2' apply false}" > build.gradle
+          echo "android.useAndroidX=true" > gradle.properties
+          cat > app/build.gradle <<'EOF'
+          plugins{id 'com.android.application'}
+          android{
+            namespace 'com.aero.webview'
+            compileSdk 34
+            defaultConfig{
+              applicationId 'com.aero.webview'
+              minSdk 21
+              targetSdk 34
+              versionCode 1
+              versionName '1.0'
+            }
+            compileOptions{
+              sourceCompatibility JavaVersion.VERSION_17
+              targetCompatibility JavaVersion.VERSION_17
+            }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <application android:label="My App" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+              <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/aero/webview/MainActivity.java <<'EOF'
+          package com.aero.webview;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.*;
+          public class MainActivity extends Activity {
+            WebView w;
+            @Override protected void onCreate(Bundle b) {
+              super.onCreate(b);
+              w = new WebView(this);
+              WebSettings s = w.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              w.setWebViewClient(new WebViewClient());
+              w.setWebChromeClient(new WebChromeClient());
+              setContentView(w);
+              w.loadUrl("file:///android_asset/index.html");
+            }
+            @Override public void onBackPressed() {
+              if (w.canGoBack()) w.goBack(); else super.onBackPressed();
+            }
+          }
+          EOF
+          gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
